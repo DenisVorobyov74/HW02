@@ -1,0 +1,13 @@
+# depslib dependency file v1.0
+1655947870 source:/home/denis/GitHub/HW02/Unicode convertor/main.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+
+1656120505 source:/home/denis/GitHub/HW02/UnicodeConvertor/main.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+	<sys/stat.h>
+	<stdbool.h>
+
