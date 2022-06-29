@@ -6,25 +6,30 @@
 
 #define FileName_Size 256
 #define UnicodeArray_Size 4
+#define CodingModeArray_Size 11
 
-void GetFullPathToFiles(int argc, char* argv[], char PathToSrcFile[], char PathToDstFile[]);
+void GetFullPathToFiles(int argc, char* argv[], char PathToSrcFile[], char PathToDstFile[], char CodingMode[11]);
 void KeepOpenWindow();
 FILE* OpenFile(char* mPathToFile, const char Mode[]);
 int CloseFile(FILE* mStreamPointer);
-void PerformConversion_CP1251_To_UTF8(FILE* StreamPointerSrc, FILE* StreamPointerDst);
+void PerformConversion(void (*ConversionFnctn)(const int, char*), FILE* StreamPointerSrc, FILE* StreamPointerDst);
 void Convert_CP1251_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]);
-void Convert_CP1251_To_UTF8_SpecialCharacters(const int NewChar, char Unicode[UnicodeArray_Size]);
+void Convert_KOI8R_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]);
+void Convert_ISO_8859_5_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]);
 size_t strlcpy(char *dst, const char *src, size_t dsize);
 
 int main(int argc, char* argv[0])
 {
-    char PathToSrcFile[FileName_Size], PathToDstFile[FileName_Size];
+    char PathToSrcFile[FileName_Size], PathToDstFile[FileName_Size], CodingMode[CodingModeArray_Size];
     FILE* StreamPointerSrc;
     FILE* StreamPointerDst;
     int Result, CloseResult;
     _Bool OperationDone = true;
+    //Объявляем указатель на функцию
+    void (*ConversionFnctn)(const int, char*) = NULL;
 
-    GetFullPathToFiles(argc, argv, PathToSrcFile, PathToDstFile);
+
+    GetFullPathToFiles(argc, argv, PathToSrcFile, PathToDstFile, CodingMode);
 
     StreamPointerSrc = OpenFile(PathToSrcFile, "rb");
     if(StreamPointerSrc == NULL){
@@ -39,8 +44,19 @@ int main(int argc, char* argv[0])
     }
 
     // Выполняем конвертацию
-    if(OperationDone == true)
-        PerformConversion_CP1251_To_UTF8(StreamPointerSrc, StreamPointerDst);
+    if(OperationDone == true){
+        if(strncmp(CodingMode, "CP-1251", CodingModeArray_Size-1) == 0)
+            ConversionFnctn = Convert_CP1251_To_UTF8;
+        else if(strncmp(CodingMode, "KOI8-R", CodingModeArray_Size-1) == 0)
+            ConversionFnctn = Convert_KOI8R_To_UTF8;
+        else if(strncmp(CodingMode, "ISO-8859-5", CodingModeArray_Size-1) == 0)
+            ConversionFnctn = Convert_ISO_8859_5_To_UTF8;
+        else{
+            perror("Unknown encoding format.\n");
+            exit(EXIT_FAILURE);
+        }
+        PerformConversion(ConversionFnctn, StreamPointerSrc, StreamPointerDst);
+    }
     else
         Result = 1;
 
@@ -67,14 +83,14 @@ int main(int argc, char* argv[0])
 }
 
 // Метод выполняет конвертацию.
-void PerformConversion_CP1251_To_UTF8(FILE* StreamPointerSrc, FILE* StreamPointerDst){
+void PerformConversion(void (*ConversionFnctn)(const int, char*), FILE* StreamPointerSrc, FILE* StreamPointerDst){
 
     int NewChar, InsertError;
     char Unicode[UnicodeArray_Size];
 
     while((NewChar = fgetc(StreamPointerSrc)) != EOF){
 
-        Convert_CP1251_To_UTF8(NewChar, Unicode);
+        ConversionFnctn(NewChar, Unicode);
         InsertError = fputs(Unicode, StreamPointerDst);
         if(InsertError == EOF){
             perror("Writing error to the destination file.");
@@ -84,12 +100,13 @@ void PerformConversion_CP1251_To_UTF8(FILE* StreamPointerSrc, FILE* StreamPointe
 }
 
 // Получаем адреса файлов.
-void GetFullPathToFiles(int argc, char* argv[], char PathToSrcFile[], char PathToDstFile[]){
+void GetFullPathToFiles(int argc, char* argv[], char PathToSrcFile[], char PathToDstFile[], char CodingMode[11]){
 
     // Обрабатываем аргументы командной строки (если они есть в "достаточном" количестве)
-    if(argc == 3){
+    if(argc == 4){
         strlcpy(PathToSrcFile, argv[1], FileName_Size - 1);
         strlcpy(PathToDstFile, argv[2], FileName_Size - 1);
+        strlcpy(CodingMode,    argv[3], 10);
     }
     else{
 
@@ -101,6 +118,9 @@ void GetFullPathToFiles(int argc, char* argv[], char PathToSrcFile[], char PathT
 
         printf("Enter full path to the destination file (max len - 250ch): ");
         scanf("%250s", PathToDstFile);
+
+        printf("Enter coding mode (CP-1251, KOI8-R or ISO-8859-5) (max len - 10ch): ");
+        scanf("%10s", CodingMode);
 
     }
 }
@@ -173,6 +193,23 @@ size_t strlcpy(char *dst, const char *src, size_t dsize) {
 // Приобразует символы кодировки CP-1251 в Unicode.
 void Convert_CP1251_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]){
 
+    static char SpecCharArray[64][4] = {{0xD0,0x82,'\0'},      {0xD0, 0x83, '\0'},    {0xE2,0x80,0x9A,'\0'}, {0xD1,0x93,'\0'},      // Ђ, Ѓ, ‚, ѓ
+                                        {0xE2,0x80,0x9E,'\0'}, {0xE2,0x80,0xA6,'\0'}, {0xE2,0x80,0xA0,'\0'}, {0xE2,0x80,0xA1,'\0'}, // „, …, †, ‡
+                                        {0xE2,0x82,0xAC,'\0'}, {0xE2,0x80,0xB0,'\0'}, {0xD0,0x89,'\0'},      {0xE2,0x80,0xB9,'\0'}, // €, ‰, Љ, ‹
+                                        {0xD0,0x8A,'\0'},      {0xD0,0x8C,'\0'},      {0xD0,0x8B,'\0'},      {0xD0,0x8F,'\0'},      // Њ, Ќ, Ћ, Џ
+                                        {0xD1,0x92,'\0'},      {0xE2,0x80,0x98,'\0'}, {0xE2,0x80,0x99,'\0'}, {0xE2,0x80,0x9C,'\0'}, // ђ, ‘, ’, “
+                                        {0xE2,0x80,0x9D,'\0'}, {0xE2,0x80,0xA2,'\0'}, {0xE2,0x80,0x93,'\0'}, {0xE2,0x80,0x94,'\0'}, // ”, •, –, —
+                                        {'\0','\0','\0','\0'}, {0xE2,0x84,0xA2,'\0'}, {0xD1,0x99,'\0'},      {0xE2,0x80,0xBA,'\0'}, // , ™, љ, ›
+                                        {0xD1,0x9A,'\0'},      {0xD1,0x9C,'\0'},      {0xD1,0x9B,'\0'},      {0xD1,0x9F,'\0'},      // њ, ќ, ћ, џ
+                                        {0x20,'\0'},           {0xD0,0x8E,'\0'},      {0xD1,0x9E,'\0'},      {0xD0,0x88,'\0'},      // <<Пробел>>, Ў, ў, Ј
+                                        {0xC2,0xA4,'\0'},      {0xD2,0x90,'\0'},      {0xC2,0xA6,'\0'},      {0xC2,0xA7,'\0'},      // ¤, Ґ, ¦, §
+                                        {0xD0,0x81,'\0'},      {0xC2,0xA9,'\0'},      {0xD0,0x84,'\0'},      {0xC2,0xAB,'\0'},      // Ё, ©, Є, «
+                                        {0xC2,0xAC,'\0'},      {0xC2,0xAD,'\0'},      {0xC2,0xAE,'\0'},      {0xD0,0x87,'\0'},      // ¬, , ®, Ї
+                                        {0xC2,0xB0,'\0'},      {0xC2,0xB1,'\0'},      {0xD0,0x86,'\0'},      {0xD1,0x96,'\0'},      // °, ±, І, і
+                                        {0xD2,0x91,'\0'},      {0xC2,0xB5,'\0'},      {0xC2,0xB6,'\0'},      {0xC2,0xB7,'\0'},      // ґ, µ, ¶, ·
+                                        {0xD1,0x91,'\0'},      {0xE2,0x84,0x96,'\0'}, {0xD1,0x94,'\0'},      {0xC2,0xBB,'\0'},      // ё, №, є, »
+                                        {0xD1,0x98,'\0'},      {0xD0,0x85,'\0'},      {0xD1,0x95,'\0'},      {0xD1,0x97,'\0'}};     // ј, Ѕ, ѕ, ї
+
     switch(NewChar){
 
         case 0 ... 127:
@@ -181,7 +218,12 @@ void Convert_CP1251_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]){
             break;
 
         case 128 ... 191:
-            Convert_CP1251_To_UTF8_SpecialCharacters(NewChar, Unicode);
+            if(NewChar == 152){
+                perror("Unknown special symbol.");
+                exit(EXIT_FAILURE);
+            }
+            else
+                strlcpy(Unicode, SpecCharArray[NewChar-128], UnicodeArray_Size);
             break;
 
         case 192 ... 239:
@@ -202,409 +244,118 @@ void Convert_CP1251_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]){
     }
 }
 
-// Приобразует специальные символы кодировки CP-1251 в Unicode.
-void Convert_CP1251_To_UTF8_SpecialCharacters(const int NewChar, char Unicode[UnicodeArray_Size]){
+// Приобразует символы кодировки KOI8-R в Unicode.
+void Convert_KOI8R_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]){
+
+    static char CharArray[128][4] = {{0xE2,0x94,0x80,'\0'}, {0xE2,0x94,0x82,'\0'}, {0xE2,0x94,0x8C,'\0'}, {0xE2,0x94,0x90,'\0'}, // ─, │, ┌, ┐
+                                     {0xE2,0x94,0x94,'\0'}, {0xE2,0x94,0x98,'\0'}, {0xE2,0x94,0x9C,'\0'}, {0xE2,0x94,0xA4,'\0'}, // └, ┘, ├, ┤
+                                     {0xE2,0x94,0xAC,'\0'}, {0xE2,0x94,0xB4,'\0'}, {0xE2,0x94,0xBC,'\0'}, {0xE2,0x96,0x80,'\0'}, // ┬, ┴, ┼, ▀
+                                     {0xE2,0x96,0x84,'\0'}, {0xE2,0x96,0x88,'\0'}, {0xE2,0x96,0x8C,'\0'}, {0xE2,0x96,0x90,'\0'}, // ▄, █, ▌, ▐
+                                     {0xE2,0x96,0x91,'\0'}, {0xE2,0x96,0x92,'\0'}, {0xE2,0x96,0x93,'\0'}, {0xE2,0x8C,0xA0,'\0'}, // ░, ▒, ▓, ⌠
+                                     {0xE2,0x96,0xA0,'\0'}, {0xE2,0x88,0x99,'\0'}, {0xE2,0x88,0x9A,'\0'}, {0xE2,0x89,0x88,'\0'}, // ■, ∙, √, ≈
+                                     {0xE2,0x89,0xA4,'\0'}, {0xE2,0x89,0xA5,'\0'}, {0x20,'\0'},           {0xE2,0x8C,0xA1,'\0'}, // ≤, ≥, <Пробел>>, ⌡
+                                     {0xC2,0xB0,'\0'},      {0xC2,0xB2,'\0'},      {0xC2,0xB7,'\0'},      {0xC3,0xB7,'\0'},      // °, ², ·, ÷
+                                     {0xE2,0x95,0x90,'\0'}, {0xE2,0x95,0x91,'\0'}, {0xE2,0x95,0x92,'\0'}, {0xD1,0x91,'\0'},      // ═, ║, ╒, ё
+                                     {0xE2,0x95,0x93,'\0'}, {0xE2,0x95,0x94,'\0'}, {0xE2,0x95,0x95,'\0'}, {0xE2,0x95,0x96,'\0'}, // ╓, ╔, ╕, ╖
+                                     {0xE2,0x95,0x97,'\0'}, {0xE2,0x95,0x98,'\0'}, {0xE2,0x95,0x99,'\0'}, {0xE2,0x95,0x9A,'\0'}, // ╗, ╘, ╙, ╚
+                                     {0xE2,0x95,0x9B,'\0'}, {0xE2,0x95,0x9C,'\0'}, {0xE2,0x95,0x9D,'\0'}, {0xE2,0x95,0x9E,'\0'}, // ╛, ╜, ╝, ╞
+                                     {0xE2,0x95,0x9F,'\0'}, {0xE2,0x95,0xA0,'\0'}, {0xE2,0x95,0xA1,'\0'}, {0xD0,0x81,'\0'},      // ╟, ╠, ╡, Ё
+                                     {0xE2,0x95,0xA2,'\0'}, {0xE2,0x95,0xA3,'\0'}, {0xE2,0x95,0xA4,'\0'}, {0xE2,0x95,0xA5,'\0'}, // ╢, ╣, ╤, ╥
+                                     {0xE2,0x95,0xA6,'\0'}, {0xE2,0x95,0xA7,'\0'}, {0xE2,0x95,0xA8,'\0'}, {0xE2,0x95,0xA9,'\0'}, // ╦, ╧, ╨, ╩
+                                     {0xE2,0x95,0xAA,'\0'}, {0xE2,0x95,0xAB,'\0'}, {0xE2,0x95,0xAC,'\0'}, {0xC2,0xA9,'\0'},      // ╪, ╫, ╬, ©
+                                     {0xD1,0x8E,'\0'},      {0xD0,0xB0,'\0'},      {0xD0,0xB1,'\0'},      {0xD1,0x86,'\0'},      // ю, а, б, ц
+                                     {0xD0,0xB4,'\0'},      {0xD0,0xB5,'\0'},      {0xD1,0x84,'\0'},      {0xD0,0xB3,'\0'},      // д, е, ф, г
+                                     {0xD1,0x85,'\0'},      {0xD0,0xB8,'\0'},      {0xD0,0xB9,'\0'},      {0xD0,0xBA,'\0'},      // х, и, й, к
+                                     {0xD0,0xBB,'\0'},      {0xD0,0xBC,'\0'},      {0xD0,0xBD,'\0'},      {0xD0,0xBE,'\0'},      // л, м, н, о
+                                     {0xD0,0xBF,'\0'},      {0xD1,0x8F,'\0'},      {0xD1,0x80,'\0'},      {0xD1,0x81,'\0'},      // п, я, р, с
+                                     {0xD1,0x82,'\0'},      {0xD1,0x83,'\0'},      {0xD0,0xB6,'\0'},      {0xD0,0xB2,'\0'},      // т, у, ж, в
+                                     {0xD1,0x8C,'\0'},      {0xD1,0x8B,'\0'},      {0xD0,0xB7,'\0'},      {0xD1,0x88,'\0'},      // ь, ы, з, ш
+                                     {0xD1,0x8D,'\0'},      {0xD1,0x89,'\0'},      {0xD1,0x87,'\0'},      {0xD1,0x8A,'\0'},      // э, щ, ч, ъ, Ю
+                                     {0xD0,0xAE,'\0'},      {0xD0,0x90,'\0'},      {0xD0,0x91,'\0'},      {0xD0,0xA6,'\0'},      // Ю, А, Б, Ц
+                                     {0xD0,0x94,'\0'},      {0xD0,0x95,'\0'},      {0xD0,0xA4,'\0'},      {0xD0,0x93,'\0'},      // Д, Е, Ф, Г
+                                     {0xD0,0xA5,'\0'},      {0xD0,0x98,'\0'},      {0xD0,0x99,'\0'},      {0xD0,0x9A,'\0'},      // Х, И, Й, К
+                                     {0xD0,0x9B,'\0'},      {0xD0,0x9C,'\0'},      {0xD0,0x9D,'\0'},      {0xD0,0x9E,'\0'},      // Л, М, Н, О
+                                     {0xD0,0x9F,'\0'},      {0xD0,0xAF,'\0'},      {0xD0,0xA0,'\0'},      {0xD0,0xA1,'\0'},      // П, Я, Р, С
+                                     {0xD0,0xA2,'\0'},      {0xD0,0xA3,'\0'},      {0xD0,0x96,'\0'},      {0xD0,0x92,'\0'},      // Т, У, Ж, В
+                                     {0xD0,0xAC,'\0'},      {0xD0,0xAB,'\0'},      {0xD0,0x97,'\0'},      {0xD0,0xA8,'\0'},      // Ь, Ы, З, Ш
+                                     {0xD0,0xAD,'\0'},      {0xD0,0xA9,'\0'},      {0xD0,0xA7,'\0'},      {0xD0,0xAA,'\0'}};     // Э, Щ, Ч, Ъ
 
     switch(NewChar){
 
-        case 128: // Ђ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x82;
-            Unicode[2] = '\0';
+        case 0 ... 127:
+            Unicode[0] = (char) NewChar;
+            Unicode[1] = '\0';
             break;
 
-        case 129: // Ѓ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x83;
-            Unicode[2] = '\0';
+        case 128 ... 255:
+            strlcpy(Unicode, CharArray[NewChar-128], UnicodeArray_Size);
             break;
 
-        case 130: // ‚
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x9A;
-            Unicode[3] = '\0';
+        default:
+            perror("Unknown symbol.");
+            exit(EXIT_FAILURE);
+    }
+}
+
+// Приобразует символы кодировки ISO-8859-5 в Unicode.
+void Convert_ISO_8859_5_To_UTF8(const int NewChar, char Unicode[UnicodeArray_Size]){
+
+    switch(NewChar){
+
+        case 0 ... 127:
+            Unicode[0] = (char) NewChar;
+            Unicode[1] = '\0';
             break;
 
-        case 131: // ѓ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x93;
-            Unicode[2] = '\0';
-            break;
-
-        case 132: // „
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x9E;
-            Unicode[3] = '\0';
-            break;
-
-        case 133: // …
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0xA6;
-            Unicode[3] = '\0';
-            break;
-
-        case 134: // †
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0xA0;
-            Unicode[3] = '\0';
-            break;
-
-        case 135: // ‡
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0xA1;
-            Unicode[3] = '\0';
-            break;
-
-        case 136: // €
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x82;
-            Unicode[2] = 0xAC;
-            Unicode[3] = '\0';
-            break;
-
-        case 137: // ‰
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0xB0;
-            Unicode[3] = '\0';
-            break;
-
-        case 138: // Љ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x89;
-            Unicode[2] = '\0';
-            break;
-
-        case 139: // ‹
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0xB9;
-            Unicode[3] = '\0';
-            break;
-
-        case 140: // Њ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x8A;
-            Unicode[2] = '\0';
-            break;
-
-        case 141: // Ќ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x8C;
-            Unicode[2] = '\0';
-            break;
-
-        case 142: // Ћ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x8B;
-            Unicode[2] = '\0';
-            break;
-
-        case 143: // Џ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x8F;
-            Unicode[2] = '\0';
-            break;
-
-        case 144: // ђ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x92;
-            Unicode[2] = '\0';
-            break;
-
-        case 145: // ‘
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x98;
-            Unicode[3] = '\0';
-            break;
-
-        case 146: // ’
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x99;
-            Unicode[3] = '\0';
-            break;
-
-        case 147: // “
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x9C;
-            Unicode[3] = '\0';
-            break;
-
-        case 148: // ”
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x9D;
-            Unicode[3] = '\0';
-            break;
-
-         case 149: // •
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0xA2;
-            Unicode[3] = '\0';
-            break;
-
-        case 150: // –
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x93;
-            Unicode[3] = '\0';
-            break;
-
-        case 151: // —
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0x94;
-            Unicode[3] = '\0';
-            break;
-
-        case 152: //
-            perror("Unknown special symbol.");
+        case 128 ... 159:
+            perror("Unknown symbol.");
             exit(EXIT_FAILURE);
             break;
 
-        case 153: // ™
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x84;
-            Unicode[2] = 0xA2;
-            Unicode[3] = '\0';
-            break;
-
-        case 154: // љ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x99;
-            Unicode[2] = '\0';
-            break;
-
-        case 155: // ›
-            Unicode[0] = 0xE2;
-            Unicode[1] = 0x80;
-            Unicode[2] = 0xBA;
-            Unicode[3] = '\0';
-            break;
-
-        case 156: // њ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x9A;
-            Unicode[2] = '\0';
-            break;
-
-        case 157: // ќ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x9C;
-            Unicode[2] = '\0';
-            break;
-
-        case 158: // ћ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x9B;
-            Unicode[2] = '\0';
-            break;
-
-        case 159: // џ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x9F;
-            Unicode[2] = '\0';
-            break;
-
-        case 160: // <<Пробел>>
+        case 160:               // <<НеразрывныйПробел>>
             Unicode[0] = 0x20;
             Unicode[1] = '\0';
             break;
 
-        case 161: // Ў
+        case 161 ... 223:       // Ё, Ђ, Ѓ, Є, Ѕ, І, Ї, Ј, Љ, Њ, Ћ, Ќ, ,Ў, Џ; А...Я; а...п
             Unicode[0] = 0xD0;
-            Unicode[1] = 0x8E;
+            Unicode[1] = (char)(NewChar - 32);
             Unicode[2] = '\0';
             break;
 
-        case 162: // ў
+        case 224 ... 239:       // р...я
             Unicode[0] = 0xD1;
-            Unicode[1] = 0x9E;
+            Unicode[1] = (char)(NewChar - 96);
             Unicode[2] = '\0';
             break;
 
-        case 163: // Ј
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x88;
-            Unicode[2] = '\0';
-            break;
-
-        case 164: // ¤
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xA4;
-            Unicode[2] = '\0';
-            break;
-
-        case 165: // Ґ
-            Unicode[0] = 0xD2;
-            Unicode[1] = 0x90;
-            Unicode[2] = '\0';
-            break;
-
-        case 166: // ¦
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xA6;
-            Unicode[2] = '\0';
-            break;
-
-        case 167: // §
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xA7;
-            Unicode[2] = '\0';
-            break;
-
-        case 168: // Ё
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x81;
-            Unicode[2] = '\0';
-            break;
-
-        case 169: // ©
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xA9;
-            Unicode[2] = '\0';
-            break;
-
-        case 170: // Є
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x84;
-            Unicode[2] = '\0';
-            break;
-
-        case 171: // «
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xAB;
-            Unicode[2] = '\0';
-            break;
-
-        case 172: // ¬
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xAC;
-            Unicode[2] = '\0';
-            break;
-
-        case 173: // ­
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xAD;
-            Unicode[2] = '\0';
-            break;
-
-        case 174: // ®
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xAE;
-            Unicode[2] = '\0';
-            break;
-
-        case 175: // Ї
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x87;
-            Unicode[2] = '\0';
-            break;
-
-        case 176: // °
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xB0;
-            Unicode[2] = '\0';
-            break;
-
-        case 177: // ±
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xB1;
-            Unicode[2] = '\0';
-            break;
-
-        case 178: // І
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x86;
-            Unicode[2] = '\0';
-            break;
-
-        case 179: // і
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x96;
-            Unicode[2] = '\0';
-            break;
-
-        case 180: // ґ
-            Unicode[0] = 0xD2;
-            Unicode[1] = 0x91;
-            Unicode[2] = '\0';
-            break;
-
-        case 181: // µ
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xB5;
-            Unicode[2] = '\0';
-            break;
-
-        case 182: // ¶
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xB6;
-            Unicode[2] = '\0';
-            break;
-
-        case 183: // ·
-            Unicode[0] = 0xC2;
-            Unicode[1] = 0xB7;
-            Unicode[2] = '\0';
-            break;
-
-        case 184: // ё
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x91;
-            Unicode[2] = '\0';
-            break;
-
-        case 185: // №
+         case 240:              // №
             Unicode[0] = 0xE2;
             Unicode[1] = 0x84;
             Unicode[2] = 0x96;
             Unicode[3] = '\0';
             break;
 
-        case 186: // є
+         case 241 ... 252:      // ё, ђ, ѓ, є, ѕ, і, ї, ј, љ, њ, ћ, ќ
             Unicode[0] = 0xD1;
-            Unicode[1] = 0x94;
+            Unicode[1] = (char)(NewChar - 96);
             Unicode[2] = '\0';
             break;
 
-        case 187: // »
+        case 253:              // §
             Unicode[0] = 0xC2;
-            Unicode[1] = 0xBB;
+            Unicode[1] = 0xA7;
             Unicode[2] = '\0';
             break;
 
-        case 188: // ј
+        case 254 ... 255:      // ў, џ
             Unicode[0] = 0xD1;
-            Unicode[1] = 0x98;
+            Unicode[1] = (char)(NewChar - 96);
             Unicode[2] = '\0';
             break;
 
-        case 189: // Ѕ
-            Unicode[0] = 0xD0;
-            Unicode[1] = 0x85;
-            Unicode[2] = '\0';
-            break;
-
-        case 190: // ѕ
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x95;
-            Unicode[2] = '\0';
-            break;
-
-        case 191: // ї
-            Unicode[0] = 0xD1;
-            Unicode[1] = 0x97;
-            Unicode[2] = '\0';
-            break;
+        default:
+            perror("Unknown symbol.");
+            exit(EXIT_FAILURE);
     }
 }
